@@ -1,0 +1,26 @@
+The comments must be deleted for this file to be used with main.py!
+{
+    "render":true,
+    "action_repeat":2,
+    "n_train_loops":5, # Number of training loops between collecting new episodes
+    "lr":0.001, # learning rate
+    "batch_size":128,
+    "horizon":20, # The number of steps to take during training the rssm
+    "h_size":128, # Size of deterministic recurrent vector
+    "s_size":128, # Size of recurrent stochastic state vector
+    "grad_norm":0.5, # Used for grad clipping
+    "min_sigma":1e-5, # The minimum possible value for a stdev prediction to take
+    "env_name":"Pendulum-v0", # Name of the gym (or other) environment
+    "env_type":"gym", # Type of environment used (only applies when using custom environments)
+    "prep_fxn":"no_prep", # Name of the preprocessing func used on raw observations
+    "optim_type":"Adam", # Name of the optimizer (Adam, RMSprop, etc.)
+    "n_epochs":100, # Number of complete cycles to perform
+    "obs_depth":3, # Number of stacked raw observations for creating the observation tensor
+    "bnorm":false, # use batch normalization (I recommend against this)
+    "n_sodes":50, # Number of episodes to initially collect
+    "max_steps":20000, # Maximum number of game steps to be stored in the experience replay
+    "plan_horizon": null, # Determines number of steps to plan with during planning (if null, defaults to horizon)
+    "n_samples":4000, # Number of candidate action samples to sample during planning
+    "k":100, # k top action samples
+    "n_cem_iters":10 # number of cross entropy method sampling iterations
+}

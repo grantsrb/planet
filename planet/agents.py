@@ -35,10 +35,10 @@ class DynamicsAgent(Agent):
         self.h_size = hyps['h_size']
         self.s_size = hyps['s_size']
         self.horizon = hyps['plan_horizon'] if hyps['plan_horizon'] is not None else hyps['horizon']
-        self.n_keep = hyps['n_keep_samples']
-        self.n_try = hyps['n_action_samples']
+        self.n_keep = hyps['k']
+        self.n_try = hyps['n_samples']
         assert self.n_keep < self.n_try
-        self.n_loops = hyps['n_plan_loops']
+        self.n_iters = hyps['n_cem_iters']
         self.dynamics = dynamics
         self.rssm = dynamics.rssm
         self.encoder = dynamics.encoder
@@ -54,7 +54,7 @@ class DynamicsAgent(Agent):
         h = torch.zeros(obs.shape[0], self.h_size, device=device)
         with torch.no_grad():
             action = self.planner.plan(obs, h, self.a_size, self.horizon, n_samples=self.n_try, 
-                                            n_iters=self.n_loops, k=self.n_keep, loop=False)
+                                            n_iters=self.n_iters, k=self.n_keep, loop=False)
         return action
 
     def sample_actions(self, h, s, act_mus, act_sigmas):
