@@ -1,0 +1,11 @@
+numpy
+tqdm
+scipy
+matplotlib
+torch
+tqdm
+scikit-learn
+scikit-image
+h5py
+gym
+
