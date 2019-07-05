@@ -12,7 +12,7 @@ The comments must be deleted for this file to be used with main.py!
     "min_sigma":1e-5, # The minimum possible value for a stdev prediction to take
     "env_name":"Pendulum-v0", # Name of the gym (or other) environment
     "env_type":"gym", # Type of environment used (only applies when using custom environments)
-    "prep_fxn":"no_prep", # Name of the preprocessing func used on raw observations
+    "prep_fxn":"no_op", # Name of the preprocessing func used on raw observations
     "optim_type":"Adam", # Name of the optimizer (Adam, RMSprop, etc.)
     "n_epochs":100, # Number of complete cycles to perform
     "obs_depth":3, # Number of stacked raw observations for creating the observation tensor

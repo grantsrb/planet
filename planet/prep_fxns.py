@@ -1,5 +1,5 @@
 import numpy as np
 import torch
 
-def cart_pole(obs):
+def no_op(obs):
     return obs
