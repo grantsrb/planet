@@ -116,6 +116,7 @@ training_scripts/*/
 */description.txt
 *delete_me*
 *deleteme*
+*todo.txt
 */*_results.txt
 jupyter-notebooks/*.ipynb
 */hyps/*
