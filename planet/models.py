@@ -2,7 +2,6 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from .torch_utils import Flatten, Reshape, GaussianNoise, update_shape, conv_block, deconv_block
-from torchdeepretina.models import *
 import numpy as np
 
 FIRST_KSIZE = 9
