@@ -96,7 +96,7 @@ if __name__=="__main__":
         means = [str(np.mean(new_sode['rews'][i:i+quad])) for i in range(0,quad*4,quad)]
         steps_seen += len(new_sode['rews'])
         print("| Exec Time:", time.time()-temptime)
-        print("Inference rews by quadrant:", " -- ".join(means))
+        print("Inference rews by quadrant (early->later):", " | ".join(means))
     
     print("Total running time:", time.time()-starttime)
 
