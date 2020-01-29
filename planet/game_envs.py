@@ -7,16 +7,18 @@ from collections import deque
 import numpy as np
 import gym
 import torch
+from planet.utils import discount
 
 class GameEnv:
-    def __init__(self, env_name, env_type, prep_fxn, render=False):
+    def __init__(self, env_name, env_type, prep_fxn, rew_discount=0):
         self.env_type = env_type
+        self.env_name = env_name
         self.env = self.get_env(env_name, env_type)
         self.prep_fxn = prep_fxn
         obs_shape, a_size = self.get_game_characteristics()
         self.a_size = a_size
         self.obs_shape = obs_shape
-        self.render = render
+        self.rew_discount = rew_discount
 
     def get_game_characteristics(self):
         assert self.env is not None
@@ -25,9 +27,11 @@ class GameEnv:
             obs = self.reset()
             prepped = self.prep_fxn(obs)
             obs_shape = prepped.shape
-            try:
+            if self.env_name == "Pong-v0":
+                a_size = 3
+            elif hasattr(self.env.action_space, "n"):
                 a_size = self.env.action_space.n
-            except AttributeError as e:
+            else:
                 a_size = self.env.action_space.shape[0]
             return obs_shape, a_size
         return None, None
@@ -40,10 +44,14 @@ class GameEnv:
             # Also create Unity server api
             assert False
 
-    def step(self, action):
+    def step(self, action, render=False):
         if self.env_type == "gym":
+            if hasattr(self.env.action_space, "n"): # Discrete action space
+                action = np.argmax(action).squeeze()
+            if self.env_name == "Pong-v0":
+                action += 1
             obs, rew, done, _ = self.env.step(action)
-            if self.render:
+            if render:
                 self.env.render()
             obs = self.reshape(obs)
             return obs, rew, done, _
@@ -55,6 +63,8 @@ class GameEnv:
     def reset(self):
         if self.env_type == "gym":
             obs = self.env.reset()
+            if self.env_name == "Pong-v0":
+                obs, _, _, _ = self.env.step(1) # Fire initial shot
             obs = self.reshape(obs)
             return obs
         else:
@@ -69,7 +79,7 @@ class GameEnv:
         obs = np.transpose(obs, (2, 0, 1))
         return obs
 
-    def collect_sode(self, agent):
+    def collect_sode(self, agent, render=False):
         """
         agent: Agent object
             obj that takes actions based on observations
@@ -94,17 +104,27 @@ class GameEnv:
                 data['observs'].append(game_obs)
                 data['rews'].append(rew)
                 data['dones'].append(done)
-                action = np.squeeze(np.asarray(agent.fwd_numpy(game_obs[None])))[None]
+                action = np.asarray(agent.fwd_numpy(game_obs[None])).reshape((agent.a_size,))
                 data['actions'].append(action)
                 rew = 0
                 for i in range(agent.action_repeat):
-                    obs, r, done, _ = self.step(action)
+                    obs, r, done, _ = self.step(action, render=render)
                     rew += r
+            prepped = self.prep_fxn(obs)
+            window.appendleft(prepped)
+            game_obs = np.vstack(window)
+            data['observs'].append(game_obs)
+            data['rews'].append(rew)
+            data['dones'].append(done)
+            data['actions'].append(np.zeros_like(data['actions'][-1]))
+            if self.rew_discount > 0:
+                data['raw_rews'] = data['rews']
+                data['rews'] = discount(data['rews'], data['dones'], self.rew_discount)
+                data['rews'] = (data['rews']-data['rews'].mean())/(data['rews'].std()+1e-5)
         agent.train()
         return data
-            
 
-    def collect_sodes(self, agent, n_sodes, maxsize=None):
+    def collect_sodes(self, agent, n_sodes, maxsize=None, render=False):
         """
         agent: Agent object
             network to take actions based on observations
@@ -114,14 +134,29 @@ class GameEnv:
             sets the maximum size for the data to be collected, 
             if None no limit is set on the datasize
         """
-        data = self.collect_sode(agent)
+        data = {
+            "observs":[],
+            "rews":[],
+            "dones":[],
+            "actions":[]
+        }
+        # Collect data
+        running_size = 0
         for ep in range(n_sodes-1):
-            new_data = self.collect_sode(agent)
+            new_data = self.collect_sode(agent, render=render)
+            running_size += len(new_data['dones'])
             for k in data.keys():
-                data[k] = np.concatenate([data[k], new_data[k]], axis=0)
-            if maxsize is not None and len(data['dones']) > maxsize:
-                for k in data.keys():
-                    data[k] = data[k][-maxsize:]
+                data[k].append(np.asarray(new_data[k]))
+            if maxsize is not None and running_size > maxsize:
                 break
+
+        # Concatenate data
+        for k in data.keys():
+            data[k] = np.concatenate(data[k], axis=0)
+        # Potentially shorten data
+        if maxsize is not None and len(data['dones']) > maxsize:
+            for k in data.keys():
+                data[k] = data[k][-maxsize:]
+
         return data
 

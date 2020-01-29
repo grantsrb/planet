@@ -1,10 +1,11 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from .torch_utils import Flatten, Reshape, GaussianNoise, update_shape, conv_block, deconv_block
+from .utils import Flatten, Reshape, GaussianNoise, update_shape, conv_block, deconv_block
 import numpy as np
 
 FIRST_KSIZE = 9
+N_LAYERS = 4
 
 def cuda_if(tensor1, tensor2):
     if tensor2.is_cuda:
@@ -61,10 +62,10 @@ class RSSM(nn.Module, CustomModule):
     
     def extra_repr(self):
         return "h_size={}, s_size={}, a_size={}, n_layers={}, min_sigma={}".format(self.h_size,
-                                                                                    self.s_size,
-                                                                                    self.a_size,
-                                                                                    self.n_layers,
-                                                                                    self.min_sigma)
+                                                                                self.s_size,
+                                                                                self.a_size,
+                                                                                self.n_layers,
+                                                                                self.min_sigma)
 class Encoder(nn.Module, CustomModule):
     def __init__(self, obs_shape, h_size, s_size, bnorm=True, noise=0, min_sigma=0.0001):
         super(Encoder, self).__init__()
@@ -103,7 +104,7 @@ class Encoder(nn.Module, CustomModule):
         self.sizes.append((height, width))
         modules.append(conv)
 
-        for i in range(9):
+        for i in range(N_LAYERS):
             stride = 2 if i % 3 == 2 else 1
             height, width = update_shape((height,width), kernel=ksize, stride=stride)
             modules.append(conv_block(depth, depth, ksize, stride=stride, 
@@ -112,6 +113,7 @@ class Encoder(nn.Module, CustomModule):
 
         stride = 1
         height, width = update_shape((height,width), kernel=ksize, stride=stride)
+        print("Encoded:", height, width)
         self.sizes.append((height, width))
         conv = [nn.Conv2d(depth, depth, ksize),
                 Flatten(), nn.BatchNorm1d(height*width*depth), 
@@ -226,7 +228,7 @@ class Decoder(nn.Module, CustomModule):
         self.sizes.append((height, width))
         modules.append(deconv)
 
-        for i in range(9):
+        for i in range(N_LAYERS-1):
             stride = 2 if i % 3 == 0 else 1
             modules.append(deconv_block(depth, depth, ksize=ksize,
                                         padding=padding, stride=stride,
@@ -239,6 +241,7 @@ class Decoder(nn.Module, CustomModule):
         self.sizes.append((height, width))
         modules.append(deconv_block(depth, obs_shape[0], ksize=first_ksize, bnorm=False, activation=None, noise=0))
         height, width = update_shape((height,width), kernel=first_ksize, op="deconv")
+        print("decoder:", height, width)
         self.sizes.append((height, width))
         
         self.sequential = nn.Sequential(*modules)
@@ -281,7 +284,7 @@ class SimpleDecoder(nn.Module, CustomModule):
         self.bnorm = bnorm
 
         depth, height, width = emb_shape
-        emb_size = int(np.prod(emb_shape))
+        emb_size = depth*height*width
         if bnorm:
             self.resize = nn.Sequential(nn.Linear(h_size+s_size, emb_size), nn.BatchNorm1d(emb_size), nn.ReLU(), 
                                     nn.Linear(emb_size, emb_size), Reshape((-1, *emb_shape)))
@@ -393,7 +396,7 @@ class Dynamics(nn.Module, CustomModule):
         prev_sigma: tensor (Batch, s_size)
             optional, only used if observs is None
         """
-        hs, s_truths, s_preds, mu_truths, mu_preds, sigma_truths, sigma_preds = [],[],[], [], [], [], []
+        hs, s_truths, s_preds, mu_truths, mu_preds, sigma_truths, sigma_preds = [],[],[],[], [],[],[]
         mu, sigma = prev_mu, prev_sigma
         if observs is not None:
             mu, sigma = self.encoder(observs[:,0], prev_h)

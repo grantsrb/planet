@@ -22,5 +22,6 @@ The comments must be deleted for this file to be used with main.py!
     "plan_horizon": null, # Determines number of steps to plan with during planning (if null, defaults to horizon)
     "n_samples":4000, # Number of candidate action samples to sample during planning
     "k":100, # k top action samples
-    "n_cem_iters":10 # number of cross entropy method sampling iterations
+    "n_cem_iters":10, # number of cross entropy method sampling iterations
+    "rew_discount":0 # discount factor for rewards, if 0 has no effect
 }

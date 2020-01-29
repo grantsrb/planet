@@ -1,7 +1,9 @@
 {
     "render":true,
+    "exp_name":"test",
+    "load_file":"test/state_dicts_0.pth",
     "action_repeat":2,
-    "n_train_loops":5,
+    "n_train_loops":15,
     "lr":0.001,
     "batch_size":128,
     "horizon":20,
@@ -14,12 +16,14 @@
     "prep_fxn":"no_op",
     "optim_type":"Adam",
     "n_epochs":100,
-    "obs_depth":3,
+    "obs_depth":2,
     "bnorm":false,
-    "n_sodes":50,
-    "max_steps":20000,
-    "plan_horizon": 10,
-    "n_samples":4000,
-    "k":100,
-    "n_cem_iters":10
+    "n_new_sodes":3,
+    "n_sodes":300,
+    "max_steps":10000,
+    "plan_horizon": null,
+    "n_samples":3000,
+    "k":150,
+    "n_cem_iters":10,
+    "rew_discount":0.9
 }

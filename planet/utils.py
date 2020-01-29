@@ -2,6 +2,87 @@ import torch
 import torch.nn as nn
 import numpy as np
 
+def discount(rews, dones, disc_factor=0.99):
+    discounts = np.zeros(len(rews))
+    discounts[-1] = rews[-1]
+    for i in reversed(range(len(rews)-1)):
+        discounts[i] = rews[i] + (1-dones[i])*disc_factor*discounts[i+1]
+    return discounts
+
+def rolling_window(array, window, time_axis=0):
+    """
+    Make an ndarray with a rolling window of the last dimension.
+
+    Taken from deepretina package (https://github.com/baccuslab/deep-retina/)
+
+    Parameters
+    ----------
+    array : array_like
+        Array to add rolling window to
+
+    window : int
+        Size of rolling window
+
+    time_axis : int, optional
+        The axis of the temporal dimension, either 0 or -1 (Default: 0)
+
+    Returns
+    -------
+    Array that is a view of the original array with a added dimension
+    of size w.
+
+    Examples
+    --------
+    >>> x=np.arange(10).reshape((2,5))
+    >>> rolling_window(x, 3)
+    array([[[0, 1, 2], [1, 2, 3], [2, 3, 4]],
+           [[5, 6, 7], [6, 7, 8], [7, 8, 9]]])
+
+    Calculate rolling mean of last dimension:
+
+    >>> np.mean(rolling_window(x, 3), -1)
+    array([[ 1.,  2.,  3.],
+           [ 6.,  7.,  8.]])
+    """
+    if time_axis == 0:
+        if type(array) == type(np.array([])):
+            array = array.T
+        elif len(array.shape) >= 2:
+            l = list([i for i in range(len(array.shape))])
+            array = array.transpose(*reversed(l))
+
+    elif time_axis == -1:
+        pass
+
+    else:
+        raise ValueError('Time axis must be 0 (first dimension) or -1 (last)')
+
+    assert window >= 1, "`window` must be at least 1."
+    assert window <= array.shape[-1], "`window` is too long."
+
+    # with strides
+    shape = array.shape[:-1] + (array.shape[-1] - (window-1), window)
+    strides = array.strides + (array.strides[-1],)
+    arr = np.lib.stride_tricks.as_strided(array, shape=shape, strides=strides)
+
+    if time_axis == 0:
+        return np.rollaxis(arr.T, 1, 0)
+    else:
+        return arr
+
+def one_hot_encode(sample, dim=-1):
+    """
+    Creates a one-hot-encoding from the sample. Uses the maximum idx as the 1.
+
+    sample: tensor (B,A)
+    """
+    assert len(sample.shape) == 2
+    cols = torch.argmax(sample, dim=dim).long()
+    rows = torch.arange(len(cols)).long()
+    sample = torch.zeros_like(sample)
+    sample[rows, cols] = 1
+    return sample
+
 def cuda_if(tensor1, tensor2):
     if tensor2.is_cuda:
         return tensor1.to(tensor2.get_device())

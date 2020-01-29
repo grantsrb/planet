@@ -1,18 +1,19 @@
 import numpy as np
 import torch
 from planet.planning import Planner
-from planet.torch_utils import cuda_if
+from planet.utils import cuda_if, one_hot_encode
 import heapq
 
 class Agent(torch.nn.Module):
-    def __init__(self, obs_shape, a_size, action_repeat=3):
+    def __init__(self, obs_shape, a_size, action_repeat=3, discrete=False):
         super(Agent, self).__init__()
         self.obs_shape = obs_shape
         self.obs_depth = obs_shape[0]
         self.a_size = a_size
         self.action_repeat = action_repeat
+        self.discrete = discrete
 
-    def fwd_numpy(self, obs):
+    def fwd_numpy(self, obs, act_fxn=lambda x: x):
         """
         Recieves an ndarray and returns an ndarray
 
@@ -23,15 +24,15 @@ class Agent(torch.nn.Module):
             ndarray: the action
         """
         a_shape = (len(obs), self.a_size)
-        return np.zeros(a_shape)
+        return act_fxn(np.zeros(a_shape))
 
-    def forward(self, obs):
+    def forward(self, obs, act_fxn=lambda x: x):
         a_shape = (len(obs), self.a_size)
-        return torch.zeros(a_shape)
+        return act_fxn(torch.zeros(a_shape))
 
 class DynamicsAgent(Agent):
-    def __init__(self, obs_shape, a_size, hyps, dynamics, rew_model):
-        super().__init__(obs_shape, a_size, hyps['action_repeat'])
+    def __init__(self, obs_shape, a_size, hyps, dynamics, rew_model, discrete=False):
+        super().__init__(obs_shape, a_size, hyps['action_repeat'], discrete)
         self.h_size = hyps['h_size']
         self.s_size = hyps['s_size']
         self.horizon = hyps['plan_horizon'] if hyps['plan_horizon'] is not None else hyps['horizon']
@@ -43,26 +44,27 @@ class DynamicsAgent(Agent):
         self.rssm = dynamics.rssm
         self.encoder = dynamics.encoder
         self.rew_model = rew_model
-        self.planner = Planner(dynamics, rew_model)
+        self.planner = Planner(dynamics, rew_model, discrete)
 
-    def fwd_numpy(self, obs):
+    def fwd_numpy(self, obs, act_fxn=lambda x: x):
         obs = cuda_if(torch.from_numpy(obs).float(), self.dynamics)
-        return self.forward(obs).detach().cpu().numpy()
+        return self.forward(obs, act_fxn).detach().cpu().numpy()
 
-    def forward(self, obs):
+    def forward(self, obs, act_fxn=lambda x: x):
         device = self.dynamics.get_device()
         h = torch.zeros(obs.shape[0], self.h_size, device=device)
         with torch.no_grad():
             action = self.planner.plan(obs, h, self.a_size, self.horizon, n_samples=self.n_try, 
-                                            n_iters=self.n_iters, k=self.n_keep, loop=False)
+                                            n_iters=self.n_iters, k=self.n_keep, loop=False, act_fxn=act_fxn)
         return action
 
-    def sample_actions(self, h, s, act_mus, act_sigmas):
+    def sample_actions(self, h, s, act_mus, act_sigmas, act_fxn=lambda x: x):
         rew_sum = cuda_if(torch.zeros(self.n_try), self.dynamics)
         actions = cuda_if(torch.empty(self.horizon, self.n_try, self.a_size), self.dynamics)
         with torch.no_grad():
             for t in range(self.horizon):
                 actions[t] = act_mus[t] + act_sigmas[t]*cuda_if(torch.randn(self.n_try, self.a_size), self.dynamics)
+                actions[t] = act_fxn(actions[t])
                 h, s_mu, s_sigma = self.rssm(h, s, actions[t])
                 s = s_mu + s_sigma*torch.randn_like(s_sigma)
                 h_s_cat = torch.cat([h,s], dim=-1)
@@ -97,8 +99,8 @@ class DynamicsAgent(Agent):
         return top_idxs
 
 class RandnAgent(Agent):
-    def __init__(self, obs_shape, a_size, action_repeat=3, means=0, stds=1):
-        super().__init__(obs_shape, a_size, action_repeat)
+    def __init__(self, obs_shape, a_size, action_repeat=3, means=0, stds=1, discrete=False):
+        super().__init__(obs_shape, a_size, action_repeat, discrete)
         if type(means) == type(float()) or type(means) == type(int()):
             means = [means]
         if type(stds) == type(float()) or type(stds) == type(int()):
@@ -106,24 +108,27 @@ class RandnAgent(Agent):
         self.means = torch.FloatTensor(means)
         self.stds = torch.FloatTensor(stds)
 
-    def fwd_numpy(self, obs):
-        return self.means.numpy() + np.random.randn(len(obs), self.a_size)*self.stds.numpy()
+    def fwd_numpy(self, obs, act_fxn=lambda x: x):
+        action = self.means.numpy() + np.random.randn(len(obs), self.a_size)*self.stds.numpy()
+        return act_fxn(action)
 
-    def forward(self, obs):
+    def forward(self, obs, act_fxn=lambda x: x):
         actions = self.means + torch.randn((len(obs), self.a_size))*self.stds
+        if self.discrete:
+            actions = one_hot_encode(actions, dim=-1)
         if obs.is_cuda:
             return actions.to(obs.get_device())
-        return actions
+        return act_fxn(actions)
 
 class VRRandnAgent(Agent):
-    def fwd_numpy(self, obs):
+    def fwd_numpy(self, obs, act_fxn=lambda x: x):
         velocity = np.random.randn(1)*5 + 10
         direction = np.clip(np.random.randn(1)*25, -49, 49)
-        return [float(velocity), float(direction)]
+        return act_fxn([float(velocity), float(direction)])
 
-    def forward(self, obs):
+    def forward(self, obs, act_fxn=lambda x: x):
         velocity = torch.randn(1)*5 + 10
         direction = torch.clamp(torch.randn(1)*25, -49, 49)
-        return [velocity.item(), direction.item()]
+        return act_fxn([velocity.item(), direction.item()])
 
 

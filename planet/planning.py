@@ -7,6 +7,8 @@ Description:
 """
 import numpy as np
 import torch
+import torch.nn.functional as F
+from planet.utils import one_hot_encode
 
 class MeanPlanner:
     """
@@ -33,9 +35,10 @@ class MeanPlanner:
         return mean
 
 class Planner:
-    def __init__(self, dynamics, rew_model):
+    def __init__(self, dynamics, rew_model, discrete=False):
         self.dynamics = dynamics
         self.rew_model = rew_model
+        self.discrete = discrete
 
     def evaluate(self, hs, mus, sigmas, a_sample, loop=True):
         """
@@ -47,6 +50,9 @@ class Planner:
         returns: tensor (N, B)
         """
         n_samples, batch_size, horizon, a_size = a_sample.shape
+        if self.discrete: # Make one hot encodings
+            a_sample = one_hot_encode(a_sample.view(-1,a_size), dim=-1)
+            a_sample = a_sample.view(n_samples, batch_size, horizon, a_size)
         with torch.no_grad():
             if loop:
                 returns = []
@@ -76,12 +82,17 @@ class Planner:
                 returns = returns.view(horizon+1, n_samples, batch_size).sum(0)
             return returns
 
-    def plan(self, observs, hs, a_size, horizon, n_samples=1000, n_iters=10, k=100, loop=False):
+    def plan(self, observs, hs, a_size, horizon, n_samples=1000, n_iters=10, k=100, loop=False, act_fxn=lambda x: x):
         """
         observs: tensor (B, C, H, W)
         hs: tensor (B, h_size)
         a_size: int
         horizon: int
+        loop: bool
+            determines if the sample evalution is done as a loop (for resource constraints) 
+            or in parallel
+        act_fxn: function
+            used on each of the action samples, allows for more complex action sampling
         """
         batch_size = observs.shape[0]
         device = self.dynamics.get_device()
@@ -90,6 +101,7 @@ class Planner:
         mus, sigmas = self.dynamics.encoder(observs, hs)
         for _ in range(n_iters):
             a_sample = mean + std*torch.randn(n_samples, batch_size, horizon, a_size, device=device)
+            a_sample = act_fxn(a_sample)
             returns = self.evaluate(hs, mus, sigmas, a_sample, loop=loop) # Shape (n_samples, batch)
             _, rows = returns.topk(k, dim=0, largest=True, sorted=False) # shape (k,batch)
             # Need to index such that we grab the best
@@ -97,5 +109,8 @@ class Planner:
             elites = a_sample[rows, cols]
             mean = elites.mean(0)
             std = elites.std(0)
-        return mean[:,0]
+        if self.discrete: # Make one hot encodings
+            mean = one_hot_encode(mean.view(-1,a_size), dim=-1)
+            mean = mean.view(batch_size, horizon, a_size)
+        return act_fxn(mean[:,0])
 

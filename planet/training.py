@@ -9,8 +9,7 @@ Description:
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.distributions import kl_divergence
-from torch.distributions import Normal
+from torch.distributions import kl_divergence, Normal
 import numpy as np
 from tqdm import tqdm
 
@@ -20,12 +19,46 @@ def cuda_if(tensor, tensor2):
     return tensor
 
 class Trainer:
-    def __init__(self, dynamics, decoder, rew_model, optimizer, exp_replay):
+    def __init__(self, dynamics, decoder, rew_model, optimizer, exp_replay, gate_q=None, return_q=None):
         self.dynamics = dynamics
         self.decoder = decoder
         self.rew_model = rew_model
         self.optimizer = optimizer
         self.exp_replay = exp_replay
+
+        # These are used for multiprocessing
+        self.gate_q = gate_q
+        self.return_q = return_q
+
+    def save_state_dicts(self, save_name):
+        state_dicts = {
+            "dynamics": self.dynamics.state_dict(),
+            "decoder": self.decoder.state_dict(),
+            "rew_model": self.rew_model.state_dict(),
+            "optimizer": self.optimizer.state_dict()
+        }
+        torch.save(state_dicts, save_name)
+
+    def load_state_dicts(save_name):
+        state_dicts = torch.load(save_name)
+        self.dynamics.load_state_dict("dynamics") 
+        self.decoder.load_state_dict("decoder")
+        self.rew_model.load_state_dict("rew_model")
+        self.optimizer.load_state_dict("optimizer")
+
+    def loop_training(self, hyps):
+        assert self.gate_q is not None and self.return_q is not None
+        n_epochs = hyps['n_epochs']
+        n_train_loops = hyps['n_train_loops']
+        while True:
+            _ = self.gate_q.get()
+            for loop in range(n_train_loops):
+                print("Train Loop", loop)
+                losses = self.train(hyps)
+                for k in losses.keys():
+                    print(k+":", np.mean(losses[k]))
+            self.return_q.put(None)
+
 
     def train(self, hyps):
         batch_size = hyps['batch_size']
@@ -36,6 +69,10 @@ class Trainer:
 
         loss_keys = ["tot_loss", "kl_loss", "overs_kl", "obs_loss", "rew_loss", "overs_rew"]
         loop_losses = {k:[] for k in loss_keys}
+
+        self.dynamics.train()
+        self.decoder.train()        
+        self.rew_model.train()
 
         n_steps = len(self.exp_replay)-(horizon+1)
         perm = np.random.permutation(n_steps)
