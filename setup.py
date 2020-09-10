@@ -1,8 +1,7 @@
 from setuptools import setup, find_packages
-import planet
 
 setup(name='planet',
-      version=planet.__version__,
+      version="0.1.0",
       description='Implementation of PlaNet',
       author='Satchel Grant',
       author_email='grantsrb@gmail.com',

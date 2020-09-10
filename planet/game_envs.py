@@ -8,9 +8,16 @@ import numpy as np
 import gym
 import torch
 from planet.utils import discount
+from mlagents_envs.environment import UnityEnvironment                     
+from gym_unity.envs import UnityToGymWrapper                               
+from mlagents_envs.side_channel.engine_configuration_channel import EngineConfigurationChannel
+import time
 
 class GameEnv:
-    def __init__(self, env_name, env_type, prep_fxn, rew_discount=0):
+    def __init__(self, env_name, env_type, prep_fxn, rew_discount=0,
+                                                     seed=None,
+                                                     action_repeat=1):
+        self.seed = seed if seed is not None else time.time()
         self.env_type = env_type
         self.env_name = env_name
         self.env = self.get_env(env_name, env_type)
@@ -19,11 +26,12 @@ class GameEnv:
         self.a_size = a_size
         self.obs_shape = obs_shape
         self.rew_discount = rew_discount
+        self.action_repeat = action_repeat
 
     def get_game_characteristics(self):
         assert self.env is not None
 
-        if self.env_type == "gym":
+        if self.env_type == "gym" or self.env_type == "unity":
             obs = self.reset()
             prepped = self.prep_fxn(obs)
             obs_shape = prepped.shape
@@ -31,6 +39,9 @@ class GameEnv:
                 a_size = 3
             elif hasattr(self.env.action_space, "n"):
                 a_size = self.env.action_space.n
+            elif self.env_type == "unity":
+                a_size = 5
+                print("hard coded action size! try to change this!")
             else:
                 a_size = self.env.action_space.shape[0]
             return obs_shape, a_size
@@ -39,6 +50,12 @@ class GameEnv:
     def get_env(self, env_name, env_type):
         if env_type == "gym":
             return gym.make(env_name)
+        elif env_type == "mlagents":
+            env = UnityEnvironment(file_name=env_name,
+                                   seed=self.seed)
+            unity_env = UnityEnvironment(file_name=game_path)
+            env = UnityToGymWrapper(unity_env, allow_multiple_obs=True)
+            return env
         else:
             # Create data reading system
             # Also create Unity server api
@@ -51,6 +68,10 @@ class GameEnv:
             if self.env_name == "Pong-v0":
                 action += 1
             obs, rew, done, _ = self.env.step(action)
+            for i in range(self.action_repeat-1):
+                obs,r,d,_ = self.env.step(action)
+                rew += r
+                done = d+done > 0
             if render:
                 self.env.render()
             obs = self.reshape(obs)
@@ -61,7 +82,7 @@ class GameEnv:
             assert False
 
     def reset(self):
-        if self.env_type == "gym":
+        if self.env_type == "gym" or self.env_type == "unity":
             obs = self.env.reset()
             if self.env_name == "Pong-v0":
                 obs, _, _, _ = self.env.step(1) # Fire initial shot
