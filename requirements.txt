@@ -8,4 +8,5 @@ scikit-learn
 scikit-image
 h5py
 gym
-
+gym_unity
+mlagents_envs

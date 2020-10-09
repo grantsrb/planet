@@ -120,9 +120,15 @@ if __name__=="__main__":
     n_train_loops = hyps['n_train_loops']
     steps_seen = len(exp_replay)
     for epoch in range(n_epochs):
-        print("\n\nEpoch:", epoch)
+        log_str = ""
+        s = "\n\nEpoch: {}".format(epoch)
+        print(s)
+        log_str += s + "\n"
         temptime = time.time()
-        print("Data steps:", steps_seen,"| Tot running time:",temptime-starttime)
+        s = "Data steps: {} | Tot running time: {}"
+        s = s.format(steps_seen,temptime-starttime)
+        print(s)
+        log_str += s + "\n"
         for loop in range(n_train_loops):
             looptime = temptime
             losses = trainer.train(hyps)
@@ -147,11 +153,19 @@ if __name__=="__main__":
         print("| Exec Time:", time.time()-temptime)
         rews = new_sode['rews'] if "raw_rews" not in new_sode else new_sode['raw_rews']
         if hyps['env_name'] == "Pong-v0":
-            print("Inference rews:", rews.sum())
+            s = "Inference rews: {}".format(rews.sum())
         else:
             means = [str(np.mean(rews[i:i+quad])) for i in range(0,quad*4,quad)]
-            print("Inference rews by quadrant (early->later):", " | ".join(means))
-    print("Total running time:", time.time()-starttime)
+            s = "Inference rews by quadrant (early->later): "+" | ".join(means)
+        print(s)
+        log_str += s + "\n"
+    s = "\nTotal running time: {}".format(time.time()-starttime)
+    print(s)
+    log_str += s + "\n"
+    log_path = save_name.split(".")[0] + "_log.txt"
+    with open(log_path,'a') as f:
+        f.write(log_str)
+
 
 
 
