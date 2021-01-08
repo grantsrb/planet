@@ -12,6 +12,7 @@ import torch.nn.functional as F
 from torch.distributions import kl_divergence, Normal
 import numpy as np
 from tqdm import tqdm
+from planet.utils import sample_gauss
 
 def cuda_if(tensor, tensor2):
     if tensor2.is_cuda and tensor2.get_device() >= 0:
@@ -67,7 +68,8 @@ class Trainer:
         s_size = hyps['s_size']
         grad_norm = hyps['grad_norm']
 
-        loss_keys = ["tot_loss", "kl_loss", "overs_kl", "obs_loss", "rew_loss", "overs_rew"]
+        loss_keys = ["tot_loss", "kl_loss", "overs_kl",
+                     "obs_loss", "rew_loss", "overs_rew"]
         loop_losses = {k:[] for k in loss_keys}
 
         self.dynamics.train()
@@ -81,31 +83,42 @@ class Trainer:
             # Get data (keys: obs_seq, rew_seq, done_seq, action_seq)
             idxs = perm[loop*batch_size:(loop+1)*batch_size]
             sample = self.exp_replay.get_data(idxs, horizon=horizon)
-            obs_seq = cuda_if(torch.FloatTensor(sample['obs_seq']), self.dynamics)
-            rew_seq = cuda_if(torch.FloatTensor(sample['rew_seq']), self.rew_model)
-            done_seq = cuda_if(torch.FloatTensor(sample['done_seq']), self.dynamics)
+            obs_seq = cuda_if(torch.FloatTensor(sample['obs_seq']),
+                                                    self.dynamics)
+            rew_seq = cuda_if(torch.FloatTensor(sample['rew_seq']),
+                                                    self.rew_model)
+            done_seq = cuda_if(torch.FloatTensor(sample['done_seq']),
+                                                    self.dynamics)
             not_done_seq = 1-done_seq
-            action_seq = cuda_if(torch.FloatTensor(sample['action_seq']), self.dynamics)
+            action_seq = cuda_if(torch.FloatTensor(sample['action_seq']),
+                                                    self.dynamics)
 
             # Collect transition predictions
-            prev_h = cuda_if(torch.zeros(batch_size, h_size), self.dynamics)
-            outputs = self.dynamics(obs_seq, prev_h, actions=action_seq, not_dones=not_done_seq, 
-                                                               horizon=horizon, overshoot=False)
-            hs, s_truths, s_preds, mu_truths, mu_preds, sigma_truths, sigma_preds = outputs
-            outputs = self.dynamics(obs_seq, prev_h, actions=action_seq, not_dones=None, 
-                                                        horizon=horizon, overshoot=True)
-            h_overshots, s_overshots, _, mu_overshots, _, sigma_overshots, _ = outputs
-            
-            # Flatten out time dimension along dim 0 (Time, Batch, Size) -> (Batch*Time, Size) 
+            prev_h = torch.zeros(batch_size, h_size)
+            prev_h = cuda_if(prev_h, self.dynamics)
+            outputs = self.dynamics(obs_seq, prev_h,actions=action_seq,
+                                             not_dones=not_done_seq,
+                                             horizon=horizon,
+                                             overshoot=False)
+            hs,s_truths,s_preds,mu_truths,mu_preds,sigma_truths,sigma_preds=outputs
+            outputs = self.dynamics(obs_seq, prev_h,actions=action_seq,
+                                                    not_dones=None, 
+                                                    horizon=horizon,
+                                                    overshoot=True)
+            h_overshots,s_overshots,_,mu_overshots,_,sigma_overshots,_=outputs
+
+            # Flatten out time dimension along dim 0
+            # (Time, Batch, Size) -> (Batch*Time, Size) 
             hs_flat = torch.cat(hs, dim=0)
 
             mu_truths_flat = torch.cat(mu_truths, dim=0)
             sigma_truths_flat = torch.cat(sigma_truths, dim=0)
-            s_truths_flat = mu_truths_flat + sigma_truths_flat*torch.randn_like(sigma_truths_flat)
+            s_truths_flat=sample_gauss(mu_truths_flat, sigma_truths_flat)
 
             rew_targs = rew_seq.permute(1,0).contiguous().view(-1)
             arange = torch.arange(len(obs_seq.shape))
-            obs_targs = obs_seq.permute(1,0,*arange[2:]).contiguous().view(-1, *obs_seq.shape[2:])
+            obs_targs = obs_seq.permute(1,0,*arange[2:]).contiguous()
+            obs_targs = obs_targs.view(-1, *obs_seq.shape[2:])
 
             if len(s_preds) > 0:
                 s_preds_flat = torch.cat(s_preds, dim=0)
@@ -126,40 +139,46 @@ class Trainer:
 
             # Rew Loss
             rew_preds = self.rew_model(inpt)
-            rew_loss += F.mse_loss(rew_preds.squeeze(), rew_targs.squeeze())
-
+            rew_loss += F.mse_loss(rew_preds.squeeze(),
+                                   rew_targs.squeeze())
             # KL Loss
             if horizon > 0:
                 mu_truths_flat = torch.cat(mu_truths[1:], dim=0)
                 sigma_truths_flat = torch.cat(sigma_truths[1:], dim=0)
-                normal = Normal(torch.zeros_like(mu_truths_flat), torch.ones_like(sigma_truths_flat))
-                truth_normal_nograd = Normal(mu_truths_flat.data, sigma_truths_flat.data)
-                truth_normal_grad = Normal(mu_truths_flat, sigma_truths_flat)
+                normal = Normal(torch.zeros_like(mu_truths_flat),
+                                torch.ones_like(sigma_truths_flat))
+                truth_normal_nograd = Normal(mu_truths_flat.data,
+                                             sigma_truths_flat.data)
+                truth_normal_grad = Normal(mu_truths_flat,
+                                           sigma_truths_flat)
                 pred_normal = Normal(mu_preds_flat, sigma_preds_flat)
-                kl_loss += kl_divergence(truth_normal_grad, normal).mean()
-                kl_loss += kl_divergence(truth_normal_nograd, pred_normal).mean()
-
+                kl_loss += kl_divergence(truth_normal_grad,
+                                         normal).mean()
+                kl_loss += kl_divergence(truth_normal_nograd,
+                                         pred_normal).mean()
                 # Overshoot Flatten
                 h_overs_flat = torch.cat(h_overshots[1:], dim=0)
                 mu_overs_flat = torch.cat(mu_overshots[1:], dim=0)
                 sigma_overs_flat = torch.cat(sigma_overshots[1:], dim=0)
 
                 # Overshoot Rew Loss
-                rew_targs = rew_seq[:,1:].permute(1,0).contiguous().view(-1)
-                rand = sigma_overs_flat*torch.randn_like(sigma_overs_flat)
+                rew_targs=rew_seq[:,1:].permute(1,0).contiguous().view(-1)
+                rand=sigma_overs_flat*torch.randn_like(sigma_overs_flat)
                 s_overs_flat = mu_overs_flat + rand
                 inpt = torch.cat([h_overs_flat, s_overs_flat], dim=-1)
                 rew_pred = self.rew_model(inpt)
-                overs_rew_loss += F.mse_loss(rew_pred.squeeze(), rew_targs)
+                overs_rew_loss+=F.mse_loss(rew_pred.squeeze(),rew_targs)
 
                 # Overshoot KL Loss
                 overs_normal = Normal(mu_overs_flat, sigma_overs_flat)
-                overs_kl_loss += kl_divergence(truth_normal_nograd, overs_normal).mean()
+                overs_kl_loss += kl_divergence(truth_normal_nograd,
+                                               overs_normal).mean()
 
             # Total Loss
-            loss = obs_loss + rew_loss + overs_rew_loss + kl_loss + overs_kl_loss
-            vals = [loss.item(), kl_loss.item(), overs_kl_loss.item(), obs_loss.item(), 
-                                                rew_loss.item(), overs_rew_loss.item()]
+            loss = obs_loss + rew_loss + overs_rew_loss + kl_loss\
+                                                        + overs_kl_loss
+            vals = [loss.item(), kl_loss.item(), overs_kl_loss.item(),
+                   obs_loss.item(),rew_loss.item(),overs_rew_loss.item()]
             for k,v in zip(loss_keys, vals):
                 loop_losses[k].append(v)
 
@@ -280,10 +299,13 @@ class TrainAutoencoder:
             # Get data (keys: obs_seq, rew_seq, done_seq, action_seq)
             idxs = perm[loop*batch_size:(loop+1)*batch_size]
             sample = self.exp_replay.get_data(idxs, horizon=horizon)
-            obs_seq = cuda_if(torch.FloatTensor(sample['obs_seq']), self.encoder)
-            done_seq = cuda_if(torch.FloatTensor(sample['done_seq']), self.encoder)
+            obs_seq = cuda_if(torch.FloatTensor(sample['obs_seq']),
+                                                self.encoder)
+            done_seq = cuda_if(torch.FloatTensor(sample['done_seq']),
+                                                 self.encoder)
             not_done_seq = 1-done_seq
-            action_seq = cuda_if(torch.FloatTensor(sample['action_seq']), self.encoder)
+            action_seq=cuda_if(torch.FloatTensor(sample['action_seq']),
+                                                 self.encoder)
             prev_h = torch.zeros(batch_size, h_size)
 
             mu, sigma = self.encoder(obs_seq[:,0], prev_h)

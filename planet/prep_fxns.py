@@ -26,3 +26,15 @@ def simple_orb(obs):
     obs = cv2.resize(obs, dsize=(50,50), interpolation=cv2.INTER_CUBIC)
     obs = obs/255-.5
     return obs[None]
+
+def center_zero2one(obs):
+    """
+    obs: ndarray (C, H, W)
+        values must range from 0-1
+    """
+    obs = obs.astype(np.float32)
+    obs = 3*(obs-.5)/.5
+    if len(obs.shape)==2:
+        return obs[None]
+    return obs
+

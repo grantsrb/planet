@@ -32,6 +32,11 @@ if __name__=="__main__":
     else:
         hyps = load_json(sys.argv[1])
 
+    if hyps['exp_name'] == "test":
+        hyps['n_train_loops'] = 2
+        hyps['n_new_sodes'] = 2
+        hyps['n_epochs'] = 5
+
     # Initiallize saving variables
     save_folder = hyps['exp_name']
     if not os.path.exists(save_folder):
@@ -51,14 +56,15 @@ if __name__=="__main__":
     game = GameEnv(hyps['env_name'], hyps['env_type'], prep_fxn,
                                     rew_discount=hyps['rew_discount'])
     if len(game.obs_shape) > 1:
-        obs_shape = (hyps['obs_depth'], *game.obs_shape[1:])
+        depth = hyps['obs_depth']*game.obs_shape[0]
+        obs_shape = (depth, *game.obs_shape[1:])
     else:
         obs_shape = (hyps['obs_depth'], *game.obs_shape)
     action_repeat = hyps['action_repeat']
     discrete = hasattr(game.env.action_space, "n")
-    rand_agent = RandnAgent(obs_shape, game.a_size,
-                            action_repeat=action_repeat,
-                            discrete=discrete)
+    rand_agent = RandnAgent(obs_shape, hyps['obs_depth'], game.a_size,
+                                       action_repeat=action_repeat,
+                                       discrete=discrete)
     # Collect Initial Data
     data = game.collect_sodes(rand_agent, hyps['n_sodes'],
                                           maxsize=hyps['max_steps'])
@@ -92,7 +98,8 @@ if __name__=="__main__":
     rew_model = cuda_if(rew_model)
 
     # Make Agent
-    agent = DynamicsAgent(obs_shape, a_size, hyps, dynamics, rew_model, discrete=discrete)
+    obs_depth = hyps['obs_depth']
+    agent = DynamicsAgent(obs_shape, obs_depth, a_size, hyps, dynamics, rew_model, discrete=discrete)
 
     # Make optimizer
     params = list(dynamics.parameters()) + list(decoder.parameters()) + list(rew_model.parameters())
@@ -149,14 +156,18 @@ if __name__=="__main__":
             new_sode = game.collect_sode(agent, render=hyps['render'])
             exp_replay.add_new_data(new_sode)
             steps_seen += len(new_sode['rews'])
-        quad = len(new_sode['rews'])//4
         print("| Exec Time:", time.time()-temptime)
         rews = new_sode['rews'] if "raw_rews" not in new_sode else new_sode['raw_rews']
         if hyps['env_name'] == "Pong-v0":
             s = "Inference rews: {}".format(rews.sum())
+        elif hyps['env_name'] == "Pendulum-v0":
+            quad = max(len(new_sode['rews'])//4, 1)
+            rng = range(0,quad*4,quad)
+            means = [str(np.mean(rews[i:i+quad])) for i in rng]
+            strmeans = " | ".join(means)
+            s="Inference rews by quadrant (early->later): "+strmeans
         else:
-            means = [str(np.mean(rews[i:i+quad])) for i in range(0,quad*4,quad)]
-            s = "Inference rews by quadrant (early->later): "+" | ".join(means)
+            s = "Avg Inference Rew: {:.5f}".format(np.mean(rews))
         print(s)
         log_str += s + "\n"
     s = "\nTotal running time: {}".format(time.time()-starttime)

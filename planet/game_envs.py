@@ -3,24 +3,28 @@ Description:
     - Wrapper class for game environments
     - Mainly used to allow for sequential steps through game connected by server
 """
+import os
 from collections import deque
 import numpy as np
 import gym
 import torch
 from planet.utils import discount
-from mlagents_envs.environment import UnityEnvironment                     
-from gym_unity.envs import UnityToGymWrapper                               
+from mlagents_envs.environment import UnityEnvironment
+from gym_unity.envs import UnityToGymWrapper
 from mlagents_envs.side_channel.engine_configuration_channel import EngineConfigurationChannel
+from mlagents_envs.side_channel.environment_parameters_channel import EnvironmentParametersChannel
 import time
 
 class GameEnv:
     def __init__(self, env_name, env_type, prep_fxn, rew_discount=0,
                                                      seed=None,
-                                                     action_repeat=1):
+                                                     action_repeat=1,
+                                                     **kwargs):
         self.seed = seed if seed is not None else time.time()
         self.env_type = env_type
         self.env_name = env_name
-        self.env = self.get_env(env_name, env_type)
+        self.env = self.get_env(env_name, env_type, seed=self.seed,
+                                                    **kwargs)
         self.prep_fxn = prep_fxn
         obs_shape, a_size = self.get_game_characteristics()
         self.a_size = a_size
@@ -40,26 +44,61 @@ class GameEnv:
             elif hasattr(self.env.action_space, "n"):
                 a_size = self.env.action_space.n
             elif self.env_type == "unity":
-                a_size = 5
+                end_name = self.env_name.split("/")[-1]
+                if "Sorting" in end_name:
+                    a_size = 5
+                elif "Location" in end_name:
+                    a_size = 2
                 print("hard coded action size! try to change this!")
             else:
                 a_size = self.env.action_space.shape[0]
             return obs_shape, a_size
         return None, None
 
-    def get_env(self, env_name, env_type):
+    def get_env(self, env_name, env_type, seed, **kwargs):
         if env_type == "gym":
-            return gym.make(env_name)
-        elif env_type == "mlagents":
-            env = UnityEnvironment(file_name=env_name,
-                                   seed=self.seed)
-            unity_env = UnityEnvironment(file_name=game_path)
-            env = UnityToGymWrapper(unity_env, allow_multiple_obs=True)
-            return env
+            env = gym.make(env_name)
+            env.seed(int(seed))
+        # TODO: add env_type to hyperparams json
+        elif env_type == "unity":
+            env = self.make_unity_env(env_name=env_name, seed=seed,
+                                                      **kwargs)
         else:
             # Create data reading system
             # Also create Unity server api
             assert False
+        return env
+
+    def make_unity_env(self, env_name, float_params=None, time_scale=1,
+                                                      seed=time.time(),
+                                                      **kwargs):
+        """
+        creates a gym environment from a unity game
+
+        env_name: str
+            the path to the game
+        float_params: dict or None
+            this should be a dict of argument settings for the unity
+            environment
+            keys: varies by environment
+        time_scale: float
+            argument to set Unity's time scale. This applies less to
+            gym wrapped versions of Unity Environments, I believe..
+            but I'm not sure
+        seed: int
+            the seed for randomness
+        """
+        path = os.path.expanduser(env_name)
+        channel = EngineConfigurationChannel()
+        env_channel = EnvironmentParametersChannel()
+        env = UnityEnvironment(file_name=path,
+                               side_channels=[channel,env_channel],
+                               seed=int(seed))
+        channel.set_configuration_parameters(time_scale = 1)
+        env_channel.set_float_parameter("validation", 0)
+        env_channel.set_float_parameter("egoCentered", 0)
+        env = UnityToGymWrapper(env, allow_multiple_obs=True)
+        return env
 
     def step(self, action, render=False):
         if self.env_type == "gym":
@@ -67,19 +106,16 @@ class GameEnv:
                 action = np.argmax(action).squeeze()
             if self.env_name == "Pong-v0":
                 action += 1
-            obs, rew, done, _ = self.env.step(action)
-            for i in range(self.action_repeat-1):
-                obs,r,d,_ = self.env.step(action)
-                rew += r
-                done = d+done > 0
+        obs, rew, done, _ = self.env.step(action)
+        for i in range(self.action_repeat-1):
+            obs,r,d,_ = self.env.step(action)
+            rew += r
+            done = d+done > 0
+        if self.env_type=="gym":
             if render:
                 self.env.render()
-            obs = self.reshape(obs)
-            return obs, rew, done, _
-        else:
-            # Avoid if data reading system
-            # Ping from server if Unity Server system
-            assert False
+        obs = self.reshape(obs)
+        return obs, rew, done, _
 
     def reset(self):
         if self.env_type == "gym" or self.env_type == "unity":
@@ -92,6 +128,8 @@ class GameEnv:
             pass
 
     def reshape(self, obs):
+        if isinstance(obs,list):
+            obs = obs[0]
         if len(obs.shape) == 1:
             new_shape = (obs.shape[0],1,1)
             obs = np.reshape(obs, new_shape)
@@ -115,7 +153,8 @@ class GameEnv:
         done = False
         rew = 0
         obs_depth = agent.obs_depth
-        window = deque([np.zeros(self.obs_shape) for i in range(obs_depth-1)], maxlen=obs_depth)
+        deq = [np.zeros(self.obs_shape) for i in range(obs_depth-1)]
+        window = deque(deq, maxlen=obs_depth)
         agent.eval()
         with torch.no_grad():
             while not done:

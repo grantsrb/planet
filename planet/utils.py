@@ -2,6 +2,9 @@ import torch
 import torch.nn as nn
 import numpy as np
 
+def sample_gauss(mu, sig):
+    return mu + torch.randn_like(sig)*sig
+
 def discount(rews, dones, disc_factor=0.99):
     discounts = np.zeros(len(rews))
     discounts[-1] = rews[-1]

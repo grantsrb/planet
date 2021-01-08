@@ -27,7 +27,8 @@ class CustomModule:
             return -1
 
 class RSSM(nn.Module, CustomModule):
-    def __init__(self, h_size, s_size, a_size, rnn_type="GRU", min_sigma=0.0001):
+    def __init__(self, h_size, s_size, a_size, rnn_type="GRU",
+                                               min_sigma=0.0001):
         super(RSSM, self).__init__()
         """
         h_size - int
@@ -49,8 +50,10 @@ class RSSM(nn.Module, CustomModule):
         self.rnn_type = rnn_type
         self.min_sigma = min_sigma
 
-        self.rnn = getattr(nn, rnn_type)(input_size=(s_size+a_size), hidden_size=h_size) # Dynamics rnn
-        self.state_layer = nn.Linear(h_size, 2*s_size) # Creates mu and sigma for state gaussian
+        self.rnn = getattr(nn, rnn_type)(input_size=(s_size+a_size),
+                                    hidden_size=h_size) # Dynamics rnn
+        # Creates mu and sigma for state gaussian
+        self.state_layer = nn.Linear(h_size, 2*s_size) 
 
     def forward(self, h, s, a):
         x = torch.cat([s,a], dim=-1)
@@ -61,13 +64,14 @@ class RSSM(nn.Module, CustomModule):
         return h_new, mu, sigma
     
     def extra_repr(self):
-        return "h_size={}, s_size={}, a_size={}, n_layers={}, min_sigma={}".format(self.h_size,
-                                                                                self.s_size,
-                                                                                self.a_size,
-                                                                                self.n_layers,
-                                                                                self.min_sigma)
+        s = "h_size={}, s_size={}, a_size={}, n_layers={}, min_sigma={}"
+        return s.format(self.h_size, self.s_size, self.a_size,
+                                self.n_layers, self.min_sigma)
+
 class Encoder(nn.Module, CustomModule):
-    def __init__(self, obs_shape, h_size, s_size, bnorm=True, noise=0, min_sigma=0.0001):
+    def __init__(self, obs_shape, h_size, s_size, bnorm=True,
+                                                  noise=0,
+                                                  min_sigma=0.0001):
         super(Encoder, self).__init__()
         """
         obs_shape - list like
@@ -106,13 +110,17 @@ class Encoder(nn.Module, CustomModule):
 
         for i in range(N_LAYERS):
             stride = 2 if i % 3 == 2 else 1
-            height, width = update_shape((height,width), kernel=ksize, stride=stride)
-            modules.append(conv_block(depth, depth, ksize, stride=stride, 
-                                padding=padding, bnorm=bnorm, noise=noise))
+            height, width = update_shape((height,width),kernel=ksize,
+                                                        stride=stride)
+            modules.append(conv_block(depth, depth, ksize, stride=stride,
+                                                    padding=padding,
+                                                    bnorm=bnorm,
+                                                    noise=noise))
             self.sizes.append((height, width))
 
         stride = 1
-        height, width = update_shape((height,width), kernel=ksize, stride=stride)
+        height, width = update_shape((height,width), kernel=ksize,
+                                                     stride=stride)
         print("Encoded:", height, width)
         self.sizes.append((height, width))
         conv = [nn.Conv2d(depth, depth, ksize),
@@ -139,10 +147,13 @@ class Encoder(nn.Module, CustomModule):
         return mu, sigma
 
     def extra_repr(self):
-        return "obs_shape={}, bnorm={}, noise={}".format(self.obs_shape, self.bnorm, self.noise)
+        s = "obs_shape={}, bnorm={}, noise={}"
+        return s.format(self.obs_shape, self.bnorm, self.noise)
 
 class SimpleEncoder(nn.Module, CustomModule):
-    def __init__(self, obs_shape, h_size, s_size, bnorm=True, noise=0, min_sigma=0.0001):
+    def __init__(self, obs_shape, h_size, s_size, bnorm=True,
+                                                  noise=0,
+                                                  min_sigma=0.0001):
         super(SimpleEncoder, self).__init__()
         """
         obs_shape - list like
@@ -168,12 +179,22 @@ class SimpleEncoder(nn.Module, CustomModule):
         depth, height, width = obs_shape
         self.emb_shape = obs_shape
         if bnorm:
-            self.encoder = nn.Sequential(nn.Linear(depth*height*width+h_size, depth*height*width+h_size), 
-                                    nn.BatchNorm1d(depth*height*width+h_size), nn.ReLU(),
-                                    nn.Linear(depth*height*width+h_size, 2*s_size))
+            self.encoder = nn.Sequential(
+                               nn.Linear(depth*height*width+h_size,
+                                         depth*height*width+h_size),
+                               nn.BatchNorm1d(depth*height*width+h_size),
+                               nn.ReLU(),
+                               nn.Linear(depth*height*width+h_size,
+                                         2*s_size)
+                           )
         else:
-            self.encoder = nn.Sequential(nn.Linear(depth*height*width+h_size, depth*height*width+h_size), 
-                                    nn.ReLU(), nn.Linear(depth*height*width+h_size, 2*s_size))
+            self.encoder = nn.Sequential(
+                              nn.Linear(depth*height*width+h_size,
+                                        depth*height*width+h_size), 
+                              nn.ReLU(),
+                              nn.Linear(depth*height*width+h_size,
+                                        2*s_size)
+                           )
 
     def forward(self, obs, h):
         """
@@ -190,14 +211,18 @@ class SimpleEncoder(nn.Module, CustomModule):
         return mu, sigma
 
     def extra_repr(self):
-        return "obs_shape={}, bnorm={}, noise={}".format(self.obs_shape, self.bnorm, self.noise)
+        s = "obs_shape={}, bnorm={}, noise={}"
+        return s.format(self.obs_shape, self.bnorm, self.noise)
 
 class Decoder(nn.Module, CustomModule):
-    def __init__(self, emb_shape, obs_shape, h_size, s_size, bnorm=True, noise=0):
+    def __init__(self, emb_shape, obs_shape, h_size, s_size,
+                                                     bnorm=True,
+                                                     noise=0):
         super(Decoder, self).__init__()
         """
         emb_shape - list like (C, H, W)
-            the initial shape to reshape the embedding inputs (can take from encoder.emb_shape)
+            the initial shape to reshape the embedding inputs (can
+            take from encoder.emb_shape)
         obs_shape - list like (C, H, W)
             the final shape of the decoded tensor
         h_size - int
@@ -223,8 +248,12 @@ class Decoder(nn.Module, CustomModule):
         modules = []
         self.sizes = []
         modules.append(Reshape((-1, depth, height, width)))
-        deconv = deconv_block(depth, depth, ksize=ksize, stride=1, padding=0, bnorm=bnorm, noise=noise)
-        height, width = update_shape((height,width), kernel=ksize, op="deconv")
+        deconv = deconv_block(depth, depth, ksize=ksize, stride=1,
+                                                         padding=0,
+                                                         bnorm=bnorm,
+                                                         noise=noise)
+        height, width = update_shape((height,width), kernel=ksize,
+                                                     op="deconv")
         self.sizes.append((height, width))
         modules.append(deconv)
 
@@ -233,20 +262,29 @@ class Decoder(nn.Module, CustomModule):
             modules.append(deconv_block(depth, depth, ksize=ksize,
                                         padding=padding, stride=stride,
                                         bnorm=self.bnorm, noise=noise))
-            height, width = update_shape((height,width), kernel=ksize, stride=stride, op="deconv")
+            height, width = update_shape((height,width), kernel=ksize,
+                                                         stride=stride,
+                                                         op="deconv")
             self.sizes.append((height, width))
-        
-        modules.append(deconv_block(depth, depth, ksize=6, bnorm=bnorm, noise=noise))
-        height, width = update_shape((height,width), kernel=6, op="deconv")
+
+        modules.append(deconv_block(depth, depth, ksize=6,bnorm=bnorm,
+                                                          noise=noise))
+        height, width = update_shape((height,width),kernel=6,op="deconv")
         self.sizes.append((height, width))
-        modules.append(deconv_block(depth, obs_shape[0], ksize=first_ksize, bnorm=False, activation=None, noise=0))
-        height, width = update_shape((height,width), kernel=first_ksize, op="deconv")
+        modules.append(deconv_block(depth, obs_shape[0],
+                                           ksize=first_ksize,
+                                           bnorm=False,
+                                           activation=None,
+                                           noise=0))
+        height, width = update_shape((height,width),kernel=first_ksize,
+                                                    op="deconv")
         print("decoder:", height, width)
         self.sizes.append((height, width))
         
         self.sequential = nn.Sequential(*modules)
         emb_size = int(np.prod(emb_shape))
-        self.resize = nn.Sequential(nn.Linear(h_size+s_size, emb_size), Reshape((-1, *emb_shape)))
+        self.resize = nn.Sequential(nn.Linear(h_size+s_size, emb_size),
+                                    Reshape((-1, *emb_shape)))
 
     def forward(self, x):
         """
@@ -257,14 +295,18 @@ class Decoder(nn.Module, CustomModule):
         return self.sequential(emb)
 
     def extra_repr(self):
-        return "emb_shape={}, obs_shape={}, bnorm={}, noise={}".format(self.emb_shape, self.obs_shape, self.bnorm, self.noise)
+        s = "emb_shape={}, obs_shape={}, bnorm={}, noise={}"
+        return s.format(self.emb_shape, self.obs_shape, self.bnorm,
+                                                        self.noise)
 
 class SimpleDecoder(nn.Module, CustomModule):
-    def __init__(self, emb_shape, obs_shape, h_size, s_size, bnorm=True, noise=0):
+    def __init__(self, emb_shape, obs_shape, h_size, s_size, bnorm=True,
+                                                             noise=0):
         super(SimpleDecoder, self).__init__()
         """
         emb_shape - list like (C, H, W)
-            the initial shape to reshape the embedding inputs (can take from encoder.emb_shape)
+            the initial shape to reshape the embedding inputs (can
+            take from encoder.emb_shape)
         obs_shape - list like (C, H, W)
             the final shape of the decoded tensor
         h_size - int
@@ -286,11 +328,18 @@ class SimpleDecoder(nn.Module, CustomModule):
         depth, height, width = emb_shape
         emb_size = depth*height*width
         if bnorm:
-            self.resize = nn.Sequential(nn.Linear(h_size+s_size, emb_size), nn.BatchNorm1d(emb_size), nn.ReLU(), 
-                                    nn.Linear(emb_size, emb_size), Reshape((-1, *emb_shape)))
+            self.resize = nn.Sequential(
+                                    nn.Linear(h_size+s_size,emb_size),
+                                    nn.BatchNorm1d(emb_size),
+                                    nn.ReLU(), 
+                                    nn.Linear(emb_size, emb_size),
+                                    Reshape((-1, *emb_shape)))
         else:
-            self.resize = nn.Sequential(nn.Linear(h_size+s_size, emb_size), nn.ReLU(), 
-                                    nn.Linear(emb_size, emb_size), Reshape((-1, *emb_shape)))
+            self.resize = nn.Sequential(
+                                    nn.Linear(h_size+s_size,emb_size),
+                                    nn.ReLU(), 
+                                    nn.Linear(emb_size, emb_size),
+                                    Reshape((-1, *emb_shape)))
 
     def forward(self, x):
         """
@@ -301,10 +350,14 @@ class SimpleDecoder(nn.Module, CustomModule):
         return emb
 
     def extra_repr(self):
-        return "emb_shape={}, obs_shape={}, bnorm={}, noise={}".format(self.emb_shape, self.obs_shape, self.bnorm, self.noise)
+        s = "emb_shape={}, obs_shape={}, bnorm={}, noise={}"
+        return s.format(self.emb_shape, self.obs_shape, self.bnorm,
+                                                        self.noise)
 
 class RewardModel(nn.Module, CustomModule):
-    def __init__(self, h_size, s_size, n_feats=256, n_layers=3, noise=0, bnorm=False):
+    def __init__(self, h_size, s_size, n_feats=256, n_layers=3,
+                                                    noise=0,
+                                                    bnorm=False):
         super(RewardModel, self).__init__()
         """
         h_size - int
@@ -343,13 +396,18 @@ class RewardModel(nn.Module, CustomModule):
         return self.sequential(x)
 
     def extra_repr(self):
-        return "h_size={}, s_size={}, bnorm={}, noise={}".format(self.h_size, self.s_size, self.bnorm, self.noise)
+        s = "h_size={}, s_size={}, bnorm={}, noise={}"
+        return s.format(self.h_size,self.s_size,self.bnorm,self.noise)
 
 class Dynamics(nn.Module, CustomModule):
     """
     This class is used to perform the planning and predicting for PlaNet
     """
-    def __init__(self, obs_shape, h_size, s_size, a_size, bnorm=False, noise=0, env_name=None, min_sigma=1e-4):
+    def __init__(self, obs_shape, h_size, s_size, a_size,
+                                                  bnorm=False,
+                                                  noise=0,
+                                                  env_name=None,
+                                                  min_sigma=1e-4):
         super(Dynamics, self).__init__()
         """
         obs_shape - list like
@@ -370,12 +428,24 @@ class Dynamics(nn.Module, CustomModule):
         self.min_sigma = min_sigma
 
         if env_name is not None and env_name == "Pendulum-v0":
-            self.encoder = SimpleEncoder(obs_shape, h_size, s_size, bnorm=bnorm, noise=noise, min_sigma=min_sigma) 
+            self.encoder = SimpleEncoder(obs_shape, h_size, 
+                                                    s_size,
+                                                    bnorm=bnorm,
+                                                    noise=noise,
+                                                    min_sigma=min_sigma)
         else:
-            self.encoder = Encoder(obs_shape, h_size, s_size, bnorm=bnorm, noise=noise, min_sigma=min_sigma)
+            self.encoder = Encoder(obs_shape, h_size,
+                                              s_size,
+                                              bnorm=bnorm,
+                                              noise=noise,
+                                              min_sigma=min_sigma)
         self.rssm = RSSM(h_size, s_size, a_size, min_sigma=min_sigma) 
 
-    def forward(self, observs, prev_h, actions, not_dones, horizon=5, overshoot=False, prev_mu=None, prev_sigma=None):
+    def forward(self, observs, prev_h, actions, not_dones,
+                                                horizon=5,
+                                                overshoot=False,
+                                                prev_mu=None,
+                                                prev_sigma=None):
         """
         observs: torch FloatTensor (Batch, Horizon+1, D, H, W)
             The observations used by the agent during game play
@@ -390,13 +460,15 @@ class Dynamics(nn.Module, CustomModule):
             steps to take. If 0 only returns first encoding from
             the observation.
         overshoot: bool
-            indicates that the network should make predictions for horizon steps
+            indicates that the network should make predictions for
+            horizon steps
         prev_mu: tensor (Batch, s_size)
             optional, only used if observs is None
         prev_sigma: tensor (Batch, s_size)
             optional, only used if observs is None
         """
-        hs, s_truths, s_preds, mu_truths, mu_preds, sigma_truths, sigma_preds = [],[],[],[], [],[],[]
+        hs,s_truths,s_preds,mu_truths = [],[],[],[]
+        mu_preds,sigma_truths,sigma_preds = [],[],[]
         mu, sigma = prev_mu, prev_sigma
         if observs is not None:
             mu, sigma = self.encoder(observs[:,0], prev_h)
@@ -422,8 +494,11 @@ class Dynamics(nn.Module, CustomModule):
             s = mu + sigma*torch.randn_like(sigma)
             s_truths.append(s)
 
-        # Note that preds have length of horizon in non-overshoot case and length of 0
-        # in overshoot case. The truth arrays are used for overshooting with the 
-        # encoded mu and sigma as the first elements.
-        return hs, s_truths, s_preds, mu_truths, mu_preds, sigma_truths, sigma_preds
+        # Note that preds have length of horizon in non-overshoot case
+        # and length of 0
+
+        # in overshoot case. The truth arrays are used for overshooting
+        # with the encoded mu and sigma as the first elements.
+        return hs, s_truths, s_preds, mu_truths, mu_preds,sigma_truths,\
+                                                          sigma_preds
 

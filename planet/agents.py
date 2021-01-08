@@ -1,14 +1,28 @@
 import numpy as np
 import torch
 from planet.planning import Planner
-from planet.utils import cuda_if, one_hot_encode
+from planet.utils import cuda_if, one_hot_encode, sample_gauss
 import heapq
 
 class Agent(torch.nn.Module):
-    def __init__(self, obs_shape, a_size, action_repeat=3, discrete=False):
+    def __init__(self, obs_shape, obs_depth, a_size, action_repeat=3,
+                                                     discrete=False):
+        """
+        obs_shape: tuple of ints
+            the shape of the observations after the prep func and after
+            they've been stacked together
+        obs_depth: int
+            the number of stacked observations
+        a_size: int
+            the size of the action dimension
+        action_repeat: int
+            the number of times to repeat an action
+        discrete: bool
+            denotes if the actions are discrete or continuous
+        """
         super(Agent, self).__init__()
         self.obs_shape = obs_shape
-        self.obs_depth = obs_shape[0]
+        self.obs_depth = obs_depth
         self.a_size = a_size
         self.action_repeat = action_repeat
         self.discrete = discrete
@@ -31,11 +45,18 @@ class Agent(torch.nn.Module):
         return act_fxn(torch.zeros(a_shape))
 
 class DynamicsAgent(Agent):
-    def __init__(self, obs_shape, a_size, hyps, dynamics, rew_model, discrete=False):
-        super().__init__(obs_shape, a_size, hyps['action_repeat'], discrete)
+    def __init__(self, obs_shape, obs_depth, a_size, hyps, dynamics,
+                                                rew_model,
+                                                discrete=False):
+        super().__init__(obs_shape, obs_depth, a_size,
+                                               hyps['action_repeat'],
+                                               discrete)
         self.h_size = hyps['h_size']
         self.s_size = hyps['s_size']
-        self.horizon = hyps['plan_horizon'] if hyps['plan_horizon'] is not None else hyps['horizon']
+        if hyps['plan_horizon'] is not None:
+            self.horizon = hyps['plan_horizon']
+        else:
+            self.horizon = hyps['horizon']
         self.n_keep = hyps['k']
         self.n_try = hyps['n_samples']
         assert self.n_keep < self.n_try
@@ -54,15 +75,23 @@ class DynamicsAgent(Agent):
         device = self.dynamics.get_device()
         h = torch.zeros(obs.shape[0], self.h_size, device=device)
         with torch.no_grad():
-            action = self.planner.plan(obs, h, self.a_size, self.horizon, n_samples=self.n_try, 
-                                            n_iters=self.n_iters, k=self.n_keep, loop=False, act_fxn=act_fxn)
+            action = self.planner.plan(obs, h, self.a_size,
+                                               self.horizon,
+                                               n_samples=self.n_try, 
+                                               n_iters=self.n_iters,
+                                               k=self.n_keep,
+                                               loop=False,
+                                               act_fxn=act_fxn)
         return action
 
-    def sample_actions(self, h, s, act_mus, act_sigmas, act_fxn=lambda x: x):
+    def sample_actions(self, h, s, act_mus, act_sigmas,
+                                            act_fxn=lambda x: x):
         rew_sum = cuda_if(torch.zeros(self.n_try), self.dynamics)
-        actions = cuda_if(torch.empty(self.horizon, self.n_try, self.a_size), self.dynamics)
+        actions = torch.empty(self.horizon, self.n_try, self.a_size)
+        actions = cuda_if(actions, self.dynamics)
         with torch.no_grad():
             for t in range(self.horizon):
+                a = sample_gauss(act_mus[t],act_sigmas[t])
                 actions[t] = act_mus[t] + act_sigmas[t]*cuda_if(torch.randn(self.n_try, self.a_size), self.dynamics)
                 actions[t] = act_fxn(actions[t])
                 h, s_mu, s_sigma = self.rssm(h, s, actions[t])
@@ -99,8 +128,11 @@ class DynamicsAgent(Agent):
         return top_idxs
 
 class RandnAgent(Agent):
-    def __init__(self, obs_shape, a_size, action_repeat=3, means=0, stds=1, discrete=False):
-        super().__init__(obs_shape, a_size, action_repeat, discrete)
+    def __init__(self, obs_shape, obs_depth, a_size, action_repeat=3,
+                                                    means=0, stds=1,
+                                                    discrete=False):
+        super().__init__(obs_shape, obs_depth, a_size, action_repeat,
+                                                       discrete)
         if type(means) == type(float()) or type(means) == type(int()):
             means = [means]
         if type(stds) == type(float()) or type(stds) == type(int()):
