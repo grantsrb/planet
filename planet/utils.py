@@ -12,9 +12,9 @@ def discount(rews, dones, disc_factor=0.99):
         discounts[i] = rews[i] + (1-dones[i])*disc_factor*discounts[i+1]
     return discounts
 
-def rolling_window(array, window, time_axis=0):
+def rolling_window(array, window, axis=0, stride=1):
     """
-    Make an ndarray with a rolling window of the last dimension.
+    Make an ndarray with a rolling window of the last dimension
 
     Taken from deepretina package (https://github.com/baccuslab/deep-retina/)
 
@@ -26,8 +26,9 @@ def rolling_window(array, window, time_axis=0):
     window : int
         Size of rolling window
 
-    time_axis : int, optional
-        The axis of the temporal dimension, either 0 or -1 (Default: 0)
+    axis : int, optional
+        The axis of the temporal dimension, either 0 or -1
+        (Default: 0)
 
     Returns
     -------
@@ -47,28 +48,36 @@ def rolling_window(array, window, time_axis=0):
     array([[ 1.,  2.,  3.],
            [ 6.,  7.,  8.]])
     """
-    if time_axis == 0:
-        if type(array) == type(np.array([])):
-            array = array.T
-        elif len(array.shape) >= 2:
-            l = list([i for i in range(len(array.shape))])
-            array = array.transpose(*reversed(l))
+    if isinstance(array, torch.Tensor):
+        assert axis==0, "time axis must be 0 for torch tensors"
+        arr = array.unfold(axis, window, stride)
+        arange = torch.arange(len(arr.shape))
+        if len(arange) > 2:
+            return arr.permute(0,arange[-1],*arange[1:-1])
+        return arr
 
-    elif time_axis == -1:
+    if stride != 1:
+        s = "strides other than 1 are not implemented for ndarrays"
+        raise NotImplemented(s)
+    if axis == 0:
+        array = array.T
+
+    elif axis == -1:
         pass
 
     else:
-        raise ValueError('Time axis must be 0 (first dimension) or -1 (last)')
+        raise ValueError('Time axis must be 0 (first dimension) or -1\
+                                                              (last)')
 
     assert window >= 1, "`window` must be at least 1."
-    assert window <= array.shape[-1], "`window` is too long."
+    assert window < array.shape[-1], "`window` is too long."
 
     # with strides
-    shape = array.shape[:-1] + (array.shape[-1] - (window-1), window)
+    shape = array.shape[:-1] + (array.shape[-1] - window, window)
     strides = array.strides + (array.strides[-1],)
-    arr = np.lib.stride_tricks.as_strided(array, shape=shape, strides=strides)
-
-    if time_axis == 0:
+    arr = np.lib.stride_tricks.as_strided(array, shape=shape,
+                                             strides=strides)
+    if axis == 0:
         return np.rollaxis(arr.T, 1, 0)
     else:
         return arr
