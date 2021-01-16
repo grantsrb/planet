@@ -100,7 +100,9 @@ class Trainer:
                                              not_dones=not_done_seq,
                                              horizon=horizon,
                                              overshoot=False)
-            hs,s_truths,s_preds,mu_truths,mu_preds,sigma_truths,sigma_preds=outputs
+            hs,s_truths,s_preds,mu_truths,mu_preds,\
+                                       sigma_truths,sigma_preds=outputs
+            #TODO:Flaw in that overshots are not reset if episode ends
             outputs = self.dynamics(obs_seq, prev_h,actions=action_seq,
                                                     not_dones=None, 
                                                     horizon=horizon,
